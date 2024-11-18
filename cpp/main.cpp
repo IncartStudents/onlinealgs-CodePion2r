@@ -3,6 +3,8 @@
 #include <tuple>
 #include <cmath>
 #include <limits>
+#include <random> 
+#include <fstream> 
 
 class Welford {
 public:
@@ -57,24 +59,42 @@ std::vector<double> rolling_variance(const std::vector<double>& data, int window
         if (i >= window_size - 1) {
             double mean, variance, sample_variance;
             std::tie(mean, variance, sample_variance) = welford.finalize();
-            variances.push_back(variance); // Добавляем дисперсию в результат
+            variances.push_back(variance); 
         }
     }
 
     return variances;
 }
 
+std::vector<double> generate_random_data(size_t size, double min, double max) {
+    std::vector<double> data(size);
+    std::random_device rd; 
+    std::mt19937 gen(rd()); 
+    std::uniform_real_distribution<> dis(min, max);
+
+    for (size_t i = 0; i < size; ++i) {
+        data[i] = dis(gen); 
+    }
+
+    return data;
+}
+
 int main() {
-    std::vector<double> data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-    int window_size = 5;
+    size_t data_size = 100000; 
+    double min_value = 0.0; 
+    double max_value = 100.0;
+    int window_size = 500;
+
+    std::vector<double> data = generate_random_data(data_size, min_value, max_value);
 
     std::vector<double> result = rolling_variance(data, window_size);
 
-    std::cout << "Rolling Variance: ";
-    for (double variance : result) {
-        std::cout << variance << " ";
-    }
-    std::cout << std::endl;
-
+    std::ofstream output_file("rolling_variance.txt");
+    if (output_file.is_open()) {
+        for (double variance : result) {
+            output_file << variance << "\n"; 
+        }
+        output_file.close(); 
+    } 
     return 0;
 }
