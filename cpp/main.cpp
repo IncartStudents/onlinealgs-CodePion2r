@@ -1,6 +1,5 @@
 #include <iostream>
 #include <vector>
-#include <tuple>
 #include <cmath>
 #include <limits>
 #include <random> 
@@ -8,16 +7,47 @@
 
 class Welford {
 public:
-    Welford() : count(0), mean(0.0), M2(0.0) {}
+    Welford(int window_size) : count(0), mean(0.0), M2(0.0), window_size(window_size) {}
 
-    void update(double new_value) {
-        count++;
+    void add(double new_value) {
+        if (count < window_size) {
+            count++;
+        } else {
+            remove(oldest_value);
+        }
+
+        // Обновляем новое значение
         double delta = new_value - mean;
         mean += delta / count;
         double delta2 = new_value - mean;
         M2 += delta * delta2;
+
+        // Сохраняем значение для удаления в следующем обновлении
+        oldest_value = new_value;
     }
 
+    std::vector<double> get_variances(const std::vector<double>& data) {
+        std::vector<double> variances;
+
+        for (size_t i = 0; i < data.size(); i++) {
+            add(data[i]);
+
+            if (i >= window_size - 1) {
+                variances.push_back(get_variance());
+            }
+        }
+
+        return variances;
+    }
+
+    double get_variance() const {
+        if (count < 2) {
+            return NAN; 
+        }
+        return M2 / count; 
+    }
+
+private:
     void remove(double old_value) {
         if (count > 0) {
             count--;
@@ -28,43 +58,12 @@ public:
         }
     }
 
-    std::tuple<double, double, double> finalize() const {
-        if (count < 2) {
-            return std::make_tuple(NAN, NAN, NAN); // Если недостаточно данных
-        } else {
-            double variance = M2 / count;
-            double sample_variance = M2 / (count - 1);
-            return std::make_tuple(mean, variance, sample_variance);
-        }
-    }
-
-private:
     int count;      // Количество наблюдений
     double mean;    // Среднее значение
     double M2;      // Сумма квадратов отклонений от среднего
+    double oldest_value; // Сохранение самого старого значения для удаления
+    int window_size; // Размер окна
 };
-
-std::vector<double> rolling_variance(const std::vector<double>& data, int window_size) {
-    std::vector<double> variances;
-    Welford welford;
-
-    for (size_t i = 0; i < data.size(); i++) {
-        welford.update(data[i]);
-
-        if (i >= window_size) {
-            welford.remove(data[i - window_size]);
-        }
-
-        // Добавляем дисперсию в результат, когда окно заполнено
-        if (i >= window_size - 1) {
-            double mean, variance, sample_variance;
-            std::tie(mean, variance, sample_variance) = welford.finalize();
-            variances.push_back(variance); 
-        }
-    }
-
-    return variances;
-}
 
 std::vector<double> generate_random_data(size_t size, double min, double max) {
     std::vector<double> data(size);
@@ -77,6 +76,11 @@ std::vector<double> generate_random_data(size_t size, double min, double max) {
     }
 
     return data;
+}
+
+std::vector<double> rolling_variance(const std::vector<double>& data, int window_size) {
+    Welford welford(window_size);
+    return welford.get_variances(data); 
 }
 
 int main() {
