@@ -28,7 +28,7 @@ public:
         if (count < 2) {
             return NAN;
         }
-        return M2 / (count - 1); // Используем n-1 для выборочной дисперсии
+        return M2 / (count - 1);
     }
 
 private:
@@ -49,6 +49,41 @@ private:
     std::vector<double> values; // Храним значения для удаления
 };
 
+class TwoPassVariance {
+public:
+    TwoPassVariance(int window_size) : window_size(window_size) {}
+
+    std::vector<double> compute_variance(const std::vector<double>& data) {
+        std::vector<double> variances;
+        size_t n = data.size();
+
+        if (n < window_size) {
+            return variances; 
+        }
+
+        for (size_t i = 0; i <= n - window_size; ++i) {
+            double mean = 0.0;
+            for (size_t j = i; j < i + window_size; ++j) {
+                mean += data[j];
+            }
+            mean /= window_size;
+
+            double variance = 0.0;
+            for (size_t j = i; j < i + window_size; ++j) {
+                variance += (data[j] - mean) * (data[j] - mean);
+            }
+            variance /= (window_size - 1);
+
+            variances.push_back(variance);
+        }
+
+        return variances;
+    }
+
+private:
+    int window_size; 
+};
+
 int main() {
     size_t data_size = 100000;
     double min_value = 0.0;
@@ -67,44 +102,26 @@ int main() {
 
     // Вычисление дисперсии по скользящему окну (алгоритм Уэлфорда)
     Welford welford(window_size);
-    std::vector<double> rolling_result;
+    std::vector<double> Welford_result;
 
     for (size_t i = 0; i < data.size(); ++i) {
         welford.add(data[i]);
         if (i >= window_size - 1) {
-            rolling_result.push_back(welford.get_variance());
+           Welford_result.push_back(welford.get_variance());
         }
     }
 
-    std::ofstream rolling_output_file("rolling_variance.txt");
-    if (rolling_output_file.is_open()) {
-        for (double variance : rolling_result) {
-            rolling_output_file << variance << "\n";
+    std::ofstream Welford_output_file("Welford_variance.txt"); 
+    if (Welford_output_file.is_open()) {
+        for (double variance : Welford_result) {
+            Welford_output_file << variance << "\n";
         }
-        rolling_output_file.close();
+        Welford_output_file.close();
     }
 
     // Вычисление дисперсии по двухпроходному алгоритму
-    std::vector<double> two_pass_result;
-    size_t n = data.size();
-
-    if (n >= window_size) {
-        for (size_t i = 0; i <= n - window_size; ++i) {
-            double mean = 0.0;
-            for (size_t j = i; j < i + window_size; ++j) {
-                mean += data[j];
-            }
-            mean /= window_size;
-
-            double variance = 0.0;
-            for (size_t j = i; j < i + window_size; ++j) {
-                variance += (data[j] - mean) * (data[j] - mean);
-            }
-            variance /= (window_size - 1);
-
-            two_pass_result.push_back(variance);
-        }
-    }
+    TwoPassVariance two_pass(window_size);
+    std::vector<double> two_pass_result = two_pass.compute_variance(data);
 
     std::ofstream two_pass_output_file("two_pass_variance.txt");
     if (two_pass_output_file.is_open()) {
