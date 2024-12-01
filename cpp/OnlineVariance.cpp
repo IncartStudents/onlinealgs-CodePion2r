@@ -50,7 +50,7 @@ public:
 
     double get_variance() const {
         if (count < 2) {
-            return NAN;
+            return NAN; 
         }
         return M2 / (count - 1);
     }
@@ -84,8 +84,8 @@ class OnlineVariance {
 public:
     OnlineVariance(int window_size) 
         : window_size(window_size), welford(), buffer(window_size) {
-        results_welford = new double[window_size];
-        results_two_pass = new double[window_size];
+        results_welford = new double[1000000]; 
+        results_two_pass = new double[1000000]; 
         result_count = 0;
     }
 
@@ -96,10 +96,10 @@ public:
 
     void process(double new_value) {
         welford.add(new_value);
-        
         buffer.add(new_value);
 
-        if (buffer.get_count() == window_size) {
+    
+        if (result_count < 1000000) { 
             results_welford[result_count] = welford.get_variance();
             results_two_pass[result_count] = compute_two_pass_variance(buffer);
             result_count++;
@@ -137,11 +137,11 @@ void write_results_to_file(const std::string& filename, const double* results, s
     } else {
         throw std::runtime_error("Could not open output file");
     }
- }
+}
 
 int main() {
     const size_t data_size = 100000; 
-    const int num_cycles = 100;       
+    const int num_cycles = 100; 
     double min_value = 0.0;
     double max_value = 100.0;
     int window_size = 500;
@@ -159,8 +159,20 @@ int main() {
         }
     }
 
-    write_results_to_file("welford_results.txt", online_variance.get_welford_results(), online_variance.get_result_count());
-    write_results_to_file("two_pass_results.txt", online_variance.get_two_pass_results(), online_variance.get_result_count());
+    size_t welford_count = online_variance.get_result_count();
+    size_t two_pass_count = online_variance.get_result_count();
+
+    if (welford_count > 0) {
+        write_results_to_file("welford_results.txt", online_variance.get_welford_results(), welford_count);
+    } else {
+        std::cout << "No Welford results to write." << std::endl; 
+    }
+
+    if (two_pass_count > 0) {
+        write_results_to_file("two_pass_results.txt", online_variance.get_two_pass_results(), two_pass_count);
+    } else {
+        std::cout << "No Two Pass results to write." << std::endl; 
+    }
 
     return 0;
 }
