@@ -49,48 +49,12 @@ private:
     std::vector<double> values; // Храним значения для удаления
 };
 
-class TwoPassVariance {
-public:
-    TwoPassVariance(int window_size) : window_size(window_size) {}
-
-    std::vector<double> compute_variance(const std::vector<double>& data) {
-        std::vector<double> variances;
-        size_t n = data.size();
-
-        if (n < window_size) {
-            return variances; 
-        }
-
-        for (size_t i = 0; i <= n - window_size; ++i) {
-            double mean = 0.0;
-            for (size_t j = i; j < i + window_size; ++j) {
-                mean += data[j];
-            }
-            mean /= window_size;
-
-            double variance = 0.0;
-            for (size_t j = i; j < i + window_size; ++j) {
-                variance += (data[j] - mean) * (data[j] - mean);
-            }
-            variance /= (window_size - 1);
-
-            variances.push_back(variance);
-        }
-
-        return variances;
-    }
-
-private:
-    int window_size; 
-};
-
 int main() {
     size_t data_size = 100000;
     double min_value = 0.0;
     double max_value = 100.0;
     int window_size = 500;
 
-    // Генерация случайных данных
     std::vector<double> data(data_size);
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -120,8 +84,26 @@ int main() {
     }
 
     // Вычисление дисперсии по двухпроходному алгоритму
-    TwoPassVariance two_pass(window_size);
-    std::vector<double> two_pass_result = two_pass.compute_variance(data);
+    std::vector<double> two_pass_result;
+    size_t n = data.size();
+
+    if (n >= window_size) {
+        for (size_t i = 0; i <= n - window_size; ++i) {
+            double mean = 0.0;
+            for (size_t j = i; j < i + window_size; ++j) {
+                mean += data[j];
+            }
+            mean /= window_size;
+
+            double variance = 0.0;
+            for (size_t j = i; j < i + window_size; ++j) {
+                variance += (data[j] - mean) * (data[j] - mean);
+            }
+            variance /= (window_size - 1);
+
+            two_pass_result.push_back(variance);
+        }
+    }
 
     std::ofstream two_pass_output_file("two_pass_variance.txt");
     if (two_pass_output_file.is_open()) {
