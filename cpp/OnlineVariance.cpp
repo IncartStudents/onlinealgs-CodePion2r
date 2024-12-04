@@ -4,6 +4,9 @@
 #include <random>
 #include <fstream>
 
+
+void write_results_to_file(const std::string& filename, const double* results, size_t result_count);
+
 class CircularBuffer {
 public:
     CircularBuffer(size_t size) : size(size), head(0), count(0) {
@@ -18,6 +21,12 @@ public:
         buffer[head] = value;
         head = (head + 1) % size;
         if (count < size) count++;
+    }
+
+    void add_batch(const double* values, size_t batch_size) {
+        for (size_t i = 0; i < batch_size; ++i) {
+            add(values[i]);
+        }
     }
 
     double get(size_t index) const {
@@ -46,6 +55,12 @@ public:
         mean += delta / count;
         double delta2 = new_value - mean;
         M2 += delta * delta2;
+    }
+
+    void add_batch(const double* values, size_t batch_size) {
+        for (size_t i = 0; i < batch_size; ++i) {
+            add(values[i]);
+        }
     }
 
     double get_variance() const {
@@ -82,36 +97,39 @@ double compute_two_pass_variance(const CircularBuffer& buffer) {
 
 class OnlineVariance {
 public:
-    OnlineVariance(int window_size) 
-        : window_size(window_size), welford(), buffer(window_size) {
-        results_welford = new double[1000000]; 
-        results_two_pass = new double[1000000]; 
+    static constexpr size_t BUFFER_SIZE = 10000; 
+
+    OnlineVariance(size_t max_size, int window_size) 
+        : max_size(max_size), window_size(window_size), welford(), buffer(window_size) {
         result_count = 0;
+        buffered_results_welford = new double[BUFFER_SIZE]; 
+        buffered_results_two_pass = new double[BUFFER_SIZE]; 
+        buffered_count = 0; 
     }
 
     ~OnlineVariance() {
-        delete[] results_welford;
-        delete[] results_two_pass;
+        delete[] buffered_results_welford;
+        delete[] buffered_results_two_pass;
     }
 
-    void process(double new_value) {
-        welford.add(new_value);
-        buffer.add(new_value);
+    void process(const double* new_values, size_t batch_size) {
+        welford.add_batch(new_values, batch_size);
+        buffer.add_batch(new_values, batch_size);
 
-    
-        if (result_count < 1000000) { 
-            results_welford[result_count] = welford.get_variance();
-            results_two_pass[result_count] = compute_two_pass_variance(buffer);
-            result_count++;
+        for (size_t i = 0; i < batch_size; ++i) {
+            if (result_count < max_size) { 
+                buffered_results_welford[buffered_count] = welford.get_variance();
+                buffered_results_two_pass[buffered_count] = compute_two_pass_variance(buffer);
+                buffered_count++;
+                result_count++;
+            }
+
+            if (buffered_count == BUFFER_SIZE) {
+                write_results_to_file("welford_results.txt", buffered_results_welford, buffered_count);
+                write_results_to_file("two_pass_results.txt", buffered_results_two_pass, buffered_count);
+                buffered_count = 0; 
+            }
         }
-    }
-
-    const double* get_welford_results() const {
-        return results_welford;
-    }
-
-    const double* get_two_pass_results() const {
-        return results_two_pass;
     }
 
     size_t get_result_count() const {
@@ -121,14 +139,16 @@ public:
 private:
     Welford welford;
     CircularBuffer buffer; 
-    double* results_welford; 
-    double* results_two_pass; 
+    size_t max_size;
     size_t window_size;
     size_t result_count;
+    double* buffered_results_welford; 
+    double* buffered_results_two_pass; 
+    size_t buffered_count; 
 };
 
 void write_results_to_file(const std::string& filename, const double* results, size_t result_count) {
-    std::ofstream file(filename);
+    std::ofstream file(filename, std::ios::app);
     if (file.is_open()) {
         for (size_t i = 0; i < result_count; ++i) {
             file << results[i] << "\n";
@@ -150,29 +170,12 @@ int main() {
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(min_value, max_value);
 
-    OnlineVariance online_variance(window_size);
+    OnlineVariance online_variance(1000000, window_size); 
 
     for (int cycle = 0; cycle < num_cycles; ++cycle) {
         for (size_t i = 0; i < data_size; ++i) {
-            double random_value = dis(gen);
-            online_variance.process(random_value);
+            double random_value = dis(gen); 
+            online_variance.process(&random_value, 1); 
         }
     }
-
-    size_t welford_count = online_variance.get_result_count();
-    size_t two_pass_count = online_variance.get_result_count();
-
-    if (welford_count > 0) {
-        write_results_to_file("welford_results.txt", online_variance.get_welford_results(), welford_count);
-    } else {
-        std::cout << "No Welford results to write." << std::endl; 
-    }
-
-    if (two_pass_count > 0) {
-        write_results_to_file("two_pass_results.txt", online_variance.get_two_pass_results(), two_pass_count);
-    } else {
-        std::cout << "No Two Pass results to write." << std::endl; 
-    }
-
-    return 0;
 }
