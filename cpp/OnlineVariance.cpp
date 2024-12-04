@@ -3,7 +3,8 @@
 #include <limits>
 #include <random>
 #include <fstream>
-
+#include <vector>
+#include <stdexcept>
 
 void write_results_to_file(const std::string& filename, const double* results, size_t result_count);
 
@@ -136,6 +137,10 @@ public:
         return result_count;
     }
 
+ CircularBuffer& get_buffer() {
+        return buffer; 
+    }
+
 private:
     Welford welford;
     CircularBuffer buffer; 
@@ -159,23 +164,64 @@ void write_results_to_file(const std::string& filename, const double* results, s
     }
 }
 
-int main() {
-    const size_t data_size = 100000; 
-    const int num_cycles = 100; 
-    double min_value = 0.0;
-    double max_value = 100.0;
-    int window_size = 500;
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(min_value, max_value);
-
-    OnlineVariance online_variance(1000000, window_size); 
-
-    for (int cycle = 0; cycle < num_cycles; ++cycle) {
-        for (size_t i = 0; i < data_size; ++i) {
-            double random_value = dis(gen); 
-            online_variance.process(&random_value, 1); 
+class SignalsFromFile {
+public:
+    SignalsFromFile(const std::string& filename, size_t channel_count)
+        : m_fscan(filename, std::ios::binary), CHANNELS(channel_count) {
+        if (!m_fscan.is_open()) {
+            throw std::runtime_error("Could not open file");
         }
     }
+
+    bool read_channel(std::vector<double>& channel_data, size_t channel_index, size_t quant) {
+        size_t len = CHANNELS * quant * sizeof(double);
+        std::vector<double> buffer(CHANNELS * quant);
+
+        if (m_fscan.eof()) return false;
+
+        m_fscan.read(reinterpret_cast<char*>(buffer.data()), len);
+        if (m_fscan.gcount() == 0) return false; 
+
+        for (size_t i = 0; i < quant; ++i) {
+            channel_data.push_back(buffer[i * CHANNELS + channel_index]);
+        }
+        return true;
+    }
+
+private:
+    std::ifstream m_fscan;
+    const size_t CHANNELS;
+};
+
+int main() {
+    const size_t data_size = 100000; 
+    const size_t batch_size = 10000; 
+    const size_t window_size = 500; 
+    const size_t channel_index = 0; 
+
+    OnlineVariance online_variance(data_size, window_size); 
+    std::vector<double> results_welford; 
+    std::vector<double> results_two_pass; 
+
+    SignalsFromFile signals("C:/Users/Timofey/Downloads/all_MX120161018125923.bin", 12);
+
+    std::vector<double> channel_data;
+    size_t quant = 40; // Количество точек, которые мы будем считывать за раз
+
+    while (signals.read_channel(channel_data, channel_index, quant)) {
+        online_variance.process(channel_data.data() + (channel_data.size() - quant), quant);
+
+        results_welford.push_back(online_variance.get_result_count() > 0 ? online_variance.get_result_count() : NAN);
+        results_two_pass.push_back(compute_two_pass_variance(online_variance.get_buffer())); 
+
+        if (results_welford.size() >= batch_size) {
+            write_results_to_file("results_welford.txt", results_welford.data(), results_welford.size());
+            write_results_to_file("results_two_pass.txt", results_two_pass.data(), results_two_pass.size());
+
+            results_welford.clear();
+            results_two_pass.clear();
+        }
+    }
+
+    return 0;
 }
