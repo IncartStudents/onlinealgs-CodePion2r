@@ -5,8 +5,11 @@
 #include <fstream>
 #include <vector>
 #include <stdexcept>
+#include <nlohmann/json.hpp>
 
-void write_results_to_file(const std::string& filename, const double* results, size_t result_count);
+void write_results_to_json(const std::string& filename, const double* results, size_t result_count);
+void save_offset(const std::string& filename, std::streamoff offset);
+std::streamoff read_offset(const std::string& filename);
 
 class CircularBuffer {
 public:
@@ -162,16 +165,36 @@ private:
     size_t buffered_count; 
 };
 
-void write_results_to_file(const std::string& filename, const double* results, size_t result_count) {
-    std::ofstream file(filename, std::ios::app);
+void write_results_to_json(const std::string& filename, const double* results, size_t result_count) {
+    nlohmann::json json_results;
+    for (size_t i = 0; i < result_count; ++i) {
+        json_results.push_back(results[i]);
+    }
+    std::ofstream file(filename);
     if (file.is_open()) {
-        for (size_t i = 0; i < result_count; ++i) {
-            file << results[i] << "\n";
-        }
+        file << json_results.dump(4); // Запись с отступами
         file.close();
     } else {
         throw std::runtime_error("Could not open output file");
     }
+}
+
+void save_offset(const std::string& filename, std::streamoff offset) {
+    std::ofstream ofs(filename);
+    if (ofs.is_open()) {
+        ofs << offset;
+        ofs.close();
+    }
+}
+
+std::streamoff read_offset(const std::string& filename) {
+    std::ifstream ifs(filename);
+    std::streamoff offset = 0;
+    if (ifs.is_open()) {
+        ifs >> offset;
+        ifs.close();
+    }
+    return offset;
 }
 
 class SignalsFromFile {
@@ -198,6 +221,10 @@ public:
         return true;
     }
 
+    std::ifstream& get_stream() {
+        return m_fscan;
+    }
+
 private:
     std::ifstream m_fscan;
     const size_t CHANNELS;
@@ -205,7 +232,7 @@ private:
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <method: welford|two_pass>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <method: welford|two_pass> [offset]" << std::endl;
         return 1;
     }
 
@@ -218,6 +245,17 @@ int main(int argc, char* argv[]) {
     OnlineVariance online_variance(data_size, window_size); 
     SignalsFromFile signals("C:/Users/Timofey/Downloads/8s001456.bin", 12);
 
+    std::streamoff offset = 0;
+
+    if (argc >= 3) {
+        offset = std::stoll(argv[2]); 
+    } else {
+        // Чтение offset из файла, если не указан
+        offset = read_offset("offset.txt");
+    }
+
+    signals.get_stream().seekg(offset); // Установка положения в файле
+
     std::vector<double> channel_data;
     size_t quant = 40; 
 
@@ -225,15 +263,16 @@ int main(int argc, char* argv[]) {
         online_variance.process(channel_data.data() + (channel_data.size() - quant), quant);
         if (online_variance.get_buffered_count() >= OnlineVariance::BUFFER_SIZE) {
             if (use_welford) {
-                write_results_to_file("welford_results.txt", online_variance.get_buffered_results_welford(), online_variance.get_buffered_count());
+                write_results_to_json("welford_results.json", online_variance.get_buffered_results_welford(), online_variance.get_buffered_count());
             } else {
-                write_results_to_file("two_pass_results.txt", online_variance.get_buffered_results_two_pass(), online_variance.get_buffered_count());
+                write_results_to_json("two_pass_results.json", online_variance.get_buffered_results_two_pass(), online_variance.get_buffered_count());
+            }
+            // Сохранение текущего offset
+            offset = signals.get_stream().tellg();
+            save_offset("offset.txt", offset);
+            online_variance.reset_buffered_count(); 
         }
-    online_variance.reset_buffered_count(); 
-        }
-
     }
-
 
     return 0;
 }
