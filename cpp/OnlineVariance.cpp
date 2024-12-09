@@ -124,12 +124,6 @@ public:
                 buffered_count++;
                 result_count++;
             }
-
-            if (buffered_count == BUFFER_SIZE) {
-                write_results_to_file("welford_results.txt", buffered_results_welford, buffered_count);
-                write_results_to_file("two_pass_results.txt", buffered_results_two_pass, buffered_count);
-                buffered_count = 0; 
-            }
         }
     }
 
@@ -137,8 +131,24 @@ public:
         return result_count;
     }
 
- CircularBuffer& get_buffer() {
+    CircularBuffer& get_buffer() {
         return buffer; 
+    }
+
+    double* get_buffered_results_welford() {
+        return buffered_results_welford; 
+    }
+
+    double* get_buffered_results_two_pass() {
+        return buffered_results_two_pass; 
+    }
+
+    size_t get_buffered_count() const {
+        return buffered_count; 
+    }
+
+    void reset_buffered_count() {
+        buffered_count = 0; 
     }
 
 private:
@@ -193,35 +203,37 @@ private:
     const size_t CHANNELS;
 };
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <method: welford|two_pass>" << std::endl;
+        return 1;
+    }
+
+    bool use_welford = (std::string(argv[1]) == "welford");
     const size_t data_size = 100000; 
     const size_t batch_size = 10000; 
     const size_t window_size = 500; 
     const size_t channel_index = 0; 
 
     OnlineVariance online_variance(data_size, window_size); 
-    std::vector<double> results_welford; 
-    std::vector<double> results_two_pass; 
-
-    SignalsFromFile signals("C:/Users/Timofey/Downloads/all_MX120161018125923.bin", 12);
+    SignalsFromFile signals("C:/Users/Timofey/Downloads/8s001456.bin", 12);
 
     std::vector<double> channel_data;
-    size_t quant = 40; // Количество точек, которые мы будем считывать за раз
+    size_t quant = 40; 
 
     while (signals.read_channel(channel_data, channel_index, quant)) {
         online_variance.process(channel_data.data() + (channel_data.size() - quant), quant);
-
-        results_welford.push_back(online_variance.get_result_count() > 0 ? online_variance.get_result_count() : NAN);
-        results_two_pass.push_back(compute_two_pass_variance(online_variance.get_buffer())); 
-
-        if (results_welford.size() >= batch_size) {
-            write_results_to_file("results_welford.txt", results_welford.data(), results_welford.size());
-            write_results_to_file("results_two_pass.txt", results_two_pass.data(), results_two_pass.size());
-
-            results_welford.clear();
-            results_two_pass.clear();
+        if (online_variance.get_buffered_count() >= OnlineVariance::BUFFER_SIZE) {
+            if (use_welford) {
+                write_results_to_file("welford_results.txt", online_variance.get_buffered_results_welford(), online_variance.get_buffered_count());
+            } else {
+                write_results_to_file("two_pass_results.txt", online_variance.get_buffered_results_two_pass(), online_variance.get_buffered_count());
         }
+    online_variance.reset_buffered_count(); 
+        }
+
     }
+
 
     return 0;
 }
