@@ -1,15 +1,12 @@
 #include <iostream>
 #include <cmath>
 #include <limits>
-#include <random>
 #include <fstream>
 #include <vector>
 #include <stdexcept>
-#include <nlohmann/json.hpp>
+#include <string>
 
-void write_results_to_json(const std::string& filename, const double* results, size_t result_count);
-void save_offset(const std::string& filename, std::streamoff offset);
-std::streamoff read_offset(const std::string& filename);
+void write_results_to_file(const std::string& filename, const double* results, size_t result_count);
 
 class CircularBuffer {
 public:
@@ -165,18 +162,13 @@ private:
     size_t buffered_count; 
 };
 
-void write_results_to_json(const std::string& filename, const double* results, size_t result_count) {
-    nlohmann::json json_results;
-    for (size_t i = 0; i < result_count; ++i) {
-        json_results.push_back(results[i]);
-    }
-    std::ofstream file(filename);
-    if (file.is_open()) {
-        file << json_results.dump(4); // Запись с отступами
-        file.close();
-    } else {
+void write_results_to_file(const std::string& filename, const double* results, size_t result_count) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file.is_open()) {
         throw std::runtime_error("Could not open output file");
     }
+    file.write(reinterpret_cast<const char*>(results), result_count * sizeof(double));
+    file.close();
 }
 
 void save_offset(const std::string& filename, std::streamoff offset) {
@@ -207,8 +199,8 @@ public:
     }
 
     bool read_channel(std::vector<double>& channel_data, size_t channel_index, size_t quant) {
-        size_t len = CHANNELS * quant * sizeof(double);
-        std::vector<double> buffer(CHANNELS * quant);
+        size_t len = CHANNELS * quant * sizeof(int);
+        std::vector<int> buffer(CHANNELS * quant);
 
         if (m_fscan.eof()) return false;
 
@@ -216,7 +208,8 @@ public:
         if (m_fscan.gcount() == 0) return false; 
 
         for (size_t i = 0; i < quant; ++i) {
-            channel_data.push_back(buffer[i * CHANNELS + channel_index]);
+            int value = buffer[i * CHANNELS + channel_index]; 
+            channel_data.push_back(value * 1.6051); 
         }
         return true;
     }
@@ -231,12 +224,13 @@ private:
 };
 
 int main(int argc, char* argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <method: welford|two_pass> [offset]" << std::endl;
+    if (argc < 4) {
+        std::cerr << "Usage: " << argv[0] << " <method: welford|two_pass> <output_format: bin|txt> [offset]" << std::endl;
         return 1;
     }
 
     bool use_welford = (std::string(argv[1]) == "welford");
+    std::string output_format = argv[2];
     const size_t data_size = 100000; 
     const size_t batch_size = 10000; 
     const size_t window_size = 500; 
@@ -245,16 +239,18 @@ int main(int argc, char* argv[]) {
     OnlineVariance online_variance(data_size, window_size); 
     SignalsFromFile signals("C:/Users/Timofey/Downloads/8s001456.bin", 12);
 
-    std::streamoff offset = 0;
-
-    if (argc >= 3) {
-        offset = std::stoll(argv[2]); 
+    std::streamoff offset = 0; 
+    if (argc >= 4) {
+        offset = std::stoll(argv[3]); 
     } else {
-        // Чтение offset из файла, если не указан
         offset = read_offset("offset.txt");
     }
-
-    signals.get_stream().seekg(offset); // Установка положения в файле
+    
+    signals.get_stream().seekg(offset);
+    if (signals.get_stream().fail()) {
+        std::cerr << "Failed to seek to offset: " << offset << std::endl;
+        return 1;
+    }
 
     std::vector<double> channel_data;
     size_t quant = 40; 
@@ -262,16 +258,24 @@ int main(int argc, char* argv[]) {
     while (signals.read_channel(channel_data, channel_index, quant)) {
         online_variance.process(channel_data.data() + (channel_data.size() - quant), quant);
         if (online_variance.get_buffered_count() >= OnlineVariance::BUFFER_SIZE) {
-            if (use_welford) {
-                write_results_to_json("welford_results.json", online_variance.get_buffered_results_welford(), online_variance.get_buffered_count());
+            std::string output_filename = use_welford ? "welford_results." + output_format : "two_pass_results." + output_format; 
+            if (output_format == "bin") {
+                write_results_to_file (output_filename, online_variance.get_buffered_results_welford(), online_variance.get_buffered_count());
+            } else if (output_format == "txt") {
+                write_results_to_file(output_filename, online_variance.get_buffered_results_two_pass(), online_variance.get_buffered_count());
             } else {
-                write_results_to_json("two_pass_results.json", online_variance.get_buffered_results_two_pass(), online_variance.get_buffered_count());
+                std::cerr << "Unsupported output format: " << output_format << std::endl;
+                return 1;
             }
-            // Сохранение текущего offset
-            offset = signals.get_stream().tellg();
-            save_offset("offset.txt", offset);
             online_variance.reset_buffered_count(); 
         }
+    }
+
+     std::streamoff current_offset = signals.get_stream().tellg();
+    if (current_offset == -1) {
+        std::cerr << "Error getting current offset." << std::endl;
+    } else {
+        save_offset ("offset.txt", current_offset);
     }
 
     return 0;
